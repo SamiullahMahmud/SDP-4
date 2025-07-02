@@ -1,17 +1,102 @@
-
 import 'package:flutter/material.dart';
 import 'package:animate_do/animate_do.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
-class DisputeResolutionScreen extends StatefulWidget {
-  const DisputeResolutionScreen({super.key});
+class AdminDisputeDetailScreen extends StatefulWidget {
+  final String disputeId;
+
+  const AdminDisputeDetailScreen({super.key, required this.disputeId});
 
   @override
-  State<DisputeResolutionScreen> createState() => _DisputeResolutionScreenState();
+  State<AdminDisputeDetailScreen> createState() => _AdminDisputeDetailScreenState();
 }
 
-class _DisputeResolutionScreenState extends State<DisputeResolutionScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _disputeController = TextEditingController();
+class _AdminDisputeDetailScreenState extends State<AdminDisputeDetailScreen> {
+  final SupabaseClient supabase = Supabase.instance.client;
+  Map<String, dynamic>? disputeData;
+  bool _isLoading = true;
+
+  final TextEditingController _disputeReasonController = TextEditingController();
+  final TextEditingController _disputeStatusController = TextEditingController();
+  final TextEditingController _jobIdController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchDisputeDetails();
+  }
+
+  @override
+  void dispose() {
+    _disputeReasonController.dispose();
+    _disputeStatusController.dispose();
+    _jobIdController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchDisputeDetails() async {
+    try {
+      final response = await supabase
+          .from('disputes')
+          .select('*, jobs(job_title), users!job_applications_worker_id_fkey(full_name), users!job_applications_employer_id_fkey(full_name)')
+          .eq('id', widget.disputeId)
+          .single();
+
+      if (mounted) {
+        setState(() {
+          disputeData = response;
+          _disputeReasonController.text = disputeData?['dispute_reason'] ?? '';
+          _disputeStatusController.text = disputeData?['dispute_status'] ?? '';
+          _jobIdController.text = disputeData?['job_id'] ?? '';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load dispute details: ${e.toString()}')));
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _updateDisputeStatus(String status) async {
+    try {
+      await supabase
+          .from('disputes')
+          .update({'dispute_status': status})
+          .eq('id', widget.disputeId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Dispute status updated to $status!')));
+        _fetchDisputeDetails(); // Re-fetch to ensure latest data is displayed
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update dispute status: ${e.toString()}')));
+      }
+    }
+  }
+
+  Widget _buildDetailField({
+    required String label,
+    required TextEditingController controller,
+    bool isEditable = false,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: TextField(
+        controller: controller,
+        readOnly: !isEditable,
+        keyboardType: keyboardType,
+        style: Theme.of(context).textTheme.bodyLarge, // Use theme text style
+        decoration: InputDecoration(
+          labelText: label,
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,136 +104,71 @@ class _DisputeResolutionScreenState extends State<DisputeResolutionScreen> {
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [Colors.blue.shade100, Colors.white],
+            colors: [Theme.of(context).scaffoldBackgroundColor, Theme.of(context).colorScheme.surface], // Use theme colors
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
         ),
         child: SafeArea(
-          child: SingleChildScrollView(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  FadeInDown(
-                    duration: const Duration(milliseconds: 800),
-                    child: Text(
-                      'Dispute Resolution',
-                      style: TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey[700],
-                        letterSpacing: 1.5,
-                        shadows: [
-                          Shadow(
-                            blurRadius: 10,
-                            color: Colors.blueAccent.withAlpha(77),
-                            offset: const Offset(0, 3),
+          child: _isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FadeInDown(
+                        duration: const Duration(milliseconds: 800),
+                        child: Text(
+                          'Dispute Details',
+                          style: Theme.of(context).textTheme.displaySmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.5,
+                            shadows: [
+                              Shadow(
+                                blurRadius: 10,
+                                color: Theme.of(context).primaryColor.withAlpha(77),
+                                offset: const Offset(0, 3),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ),
-                  const SizedBox(height: 40),
-                  FadeInUp(
-                    duration: const Duration(milliseconds: 800),
-                    delay: const Duration(milliseconds: 200),
-                    child: Form(
-                      key: _formKey,
-                      child: Column(
+                      const SizedBox(height: 20),
+                      _buildDetailField(label: 'Dispute Reason', controller: _disputeReasonController),
+                      _buildDetailField(label: 'Current Status', controller: _disputeStatusController),
+                      _buildDetailField(label: 'Job ID', controller: _jobIdController),
+                      if (disputeData?['jobs'] != null)
+                        _buildDetailField(label: 'Job Title', controller: TextEditingController(text: disputeData!['jobs']['job_title'])),
+                      if (disputeData?['users!job_applications_worker_id_fkey'] != null)
+                        _buildDetailField(label: 'Worker Name', controller: TextEditingController(text: disputeData!['users!job_applications_worker_id_fkey']['full_name'])),
+                      if (disputeData?['users!job_applications_employer_id_fkey'] != null)
+                        _buildDetailField(label: 'Employer Name', controller: TextEditingController(text: disputeData!['users!job_applications_employer_id_fkey']['full_name'])),
+                      const SizedBox(height: 20),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                         children: [
-                          TextFormField(
-                            controller: _disputeController,
-                            decoration: InputDecoration(
-                              labelText: 'Describe your dispute',
-                              labelStyle: const TextStyle(color: Colors.blueGrey),
-                              filled: true,
-                              fillColor: Colors.white,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(15)),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(15),
-                                borderSide: const BorderSide(color: Colors.blueAccent, width: 2),
-                              ),
-                              contentPadding: const EdgeInsets.all(12),
+                          ElevatedButton.icon(
+                            onPressed: () => _updateDisputeStatus('resolved'),
+                            icon: const FaIcon(FontAwesomeIcons.checkCircle, color: Colors.white),
+                            label: const Text('Resolve'),
+                            style: Theme.of(context).elevatedButtonTheme.style?.copyWith(
+                              backgroundColor: MaterialStateProperty.resolveWith((states) => Theme.of(context).primaryColor), // Use theme color
                             ),
-                            maxLines: 5,
-                            validator: (value) {
-                              if (value == null || value.isEmpty) {
-                                return 'Please enter a description of your dispute';
-                              }
-                              return null;
-                            },
                           ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: () {
-                              if (_formKey.currentState!.validate()) {
-                                // Handle dispute submission
-                              }
-                            },
-                            style: ButtonStyle(
-                              backgroundColor: MaterialStateProperty.resolveWith((states) => Colors.green),
-                              padding: MaterialStateProperty.resolveWith((states) => const EdgeInsets.symmetric(vertical: 16.0, horizontal: 80.0)),
-                              shape: MaterialStateProperty.resolveWith((states) => RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))),
-                              elevation: MaterialStateProperty.resolveWith((states) => 5),
-                              shadowColor: MaterialStateProperty.resolveWith((states) => Colors.green.withAlpha(128)),
-                            ),
-                            child: const Text(
-                              'Submit Dispute',
-                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                          ElevatedButton.icon(
+                            onPressed: () => _updateDisputeStatus('rejected'),
+                            icon: const FaIcon(FontAwesomeIcons.timesCircle, color: Colors.white),
+                            label: const Text('Reject'),
+                            style: Theme.of(context).elevatedButtonTheme.style?.copyWith(
+                              backgroundColor: MaterialStateProperty.resolveWith((states) => Theme.of(context).colorScheme.error), // Use theme color
                             ),
                           ),
                         ],
                       ),
-                    ),
+                    ],
                   ),
-                  const SizedBox(height: 32),
-                  FadeInUp(
-                    duration: const Duration(milliseconds: 800),
-                    delay: const Duration(milliseconds: 400),
-                    child: Text(
-                      'Previous Disputes',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blueGrey[700],
-                      ),
-                    ),
-                  ),
-                  FadeInUp(
-                    duration: const Duration(milliseconds: 800),
-                    delay: const Duration(milliseconds: 600),
-                    child: ListView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      itemCount: 0, // Replace with actual dispute data
-                      itemBuilder: (context, index) {
-                        return Card(
-                          color: Colors.white.withOpacity(0.9),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                          margin: const EdgeInsets.symmetric(vertical: 8),
-                          child: ListTile(
-                            title: Text(
-                              'Dispute #${index + 1}',
-                              style: TextStyle(
-                                color: Colors.blueGrey[800],
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            subtitle: const Text('Status: Pending'),
-                            onTap: () {
-                              // Handle tapping on a dispute
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+                ),
         ),
       ),
     );
